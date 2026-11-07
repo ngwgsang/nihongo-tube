@@ -26,9 +26,10 @@ Luyện nghe & shadowing tiếng Nhật với video YouTube (embed, không tải
 
 ### Từ điển
 
-`data/jmdict-common.json` được tạo từ JMdict bản "common" (tiếng Anh) của
-[jmdict-simplified](https://github.com/scriptin/jmdict-simplified): tải `jmdict-eng-common-*.json` rồi chạy
-`node scripts/build-dict.mjs <file.json>`. JMdict © [EDRDG](https://www.edrdg.org/), giấy phép CC BY-SA 4.0.
+`data/jmdict.json.gz` được tạo từ JMdict bản đầy đủ (tiếng Anh) của
+[jmdict-simplified](https://github.com/scriptin/jmdict-simplified): tải `jmdict-eng-*.json` rồi chạy
+`node scripts/build-dict.mjs <file.json>` (khoảng 466.000 mục; trùng cách viết thì ưu tiên từ thông dụng).
+JMdict © [EDRDG](https://www.edrdg.org/), giấy phép CC BY-SA 4.0.
 
 Phụ đề lấy qua endpoint không chính thức của YouTube (`src/lib/transcript.ts`) — có thể hỏng nếu YouTube thay đổi; khi đó trang vẫn xem được video nhưng không có phụ đề.
 API key chỉ dùng ở server. Kết quả API được cache bằng `"use cache"` (vài giờ), lỗi chỉ cache vài giây.

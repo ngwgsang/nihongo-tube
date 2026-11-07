@@ -75,10 +75,11 @@ function getTokenizer(): Tokenizer<IpadicFeatures> {
   return tokenizer;
 }
 
-/** JMdict rút gọn: { [từ]: [cách đọc, nghĩa] } — tạo bằng scripts/build-dict.mjs */
+/** JMdict rút gọn (bản đầy đủ, nén gzip): { [từ]: [cách đọc, nghĩa] } — tạo bằng scripts/build-dict.mjs */
 let dictionary: Record<string, [string, string]> | null = null;
 function lookup(word: string): [string, string] | undefined {
-  dictionary ??= JSON.parse(readFileSync(join(process.cwd(), "data", "jmdict-common.json"), "utf8")).entries;
+  dictionary ??= JSON.parse(gunzipSync(readFileSync(join(process.cwd(), "data", "jmdict.json.gz"))).toString("utf8"))
+    .entries;
   return dictionary![word];
 }
 
