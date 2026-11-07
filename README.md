@@ -1,36 +1,34 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NihongoTube (日本語TUBE)
 
-## Getting Started
+Luyện nghe & shadowing tiếng Nhật với video YouTube (embed, không tải về). Chỉ giữ video tiếng Nhật.
 
-First, run the development server:
+## Cài đặt
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Tạo API key YouTube Data API v3 tại Google Cloud Console (bật "YouTube Data API v3", nên giới hạn key chỉ cho API này).
+2. Tạo `.env.local`:
+   ```
+   YOUTUBE_API_KEY=...
+   ```
+3. `npm run dev` → http://localhost:3000
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Tính năng
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Trang chủ: video mới từ các kênh tuyển chọn — sửa danh sách trong `src/config/channels.ts`.
+- Tab chủ đề (Tin tức, Công nghệ, Phỏng vấn, Podcast…) — mỗi chủ đề là một truy vấn tìm kiếm tiếng Nhật, sửa trong `src/config/topics.ts`.
+- Nút "Tải thêm" ở cuối danh sách (kênh tuyển chọn, chủ đề, kết quả tìm kiếm).
+- Tìm kiếm (100 unit quota/lần, kể cả mỗi lần tải thêm) và dán link YouTube.
+- Lọc tiếng Nhật: `defaultAudioLanguage`/`defaultLanguage` = `ja`, nếu không khai báo thì dựa vào kana trong tiêu đề (`src/lib/youtube/filter.ts`).
+- Trang shadowing: tốc độ, phụ đề tiếng Nhật theo thời gian, click câu để nhảy, lặp câu N lần.
+  Phím tắt: Space, ←/→ (±2s), R (lặp câu hiện tại).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Khung Từ vựng & Ngữ pháp theo câu đang phát: tách từ bằng kuromoji (IPADIC), nghĩa tiếng Anh từ JMdict,
+  ~75 mẫu ngữ pháp N5–N3 nhận diện bằng luật (`src/lib/japanese/grammar.ts`); click mẫu ngữ pháp để tô sáng trong câu.
 
-## Learn More
+### Từ điển
 
-To learn more about Next.js, take a look at the following resources:
+`data/jmdict-common.json` được tạo từ JMdict bản "common" (tiếng Anh) của
+[jmdict-simplified](https://github.com/scriptin/jmdict-simplified): tải `jmdict-eng-common-*.json` rồi chạy
+`node scripts/build-dict.mjs <file.json>`. JMdict © [EDRDG](https://www.edrdg.org/), giấy phép CC BY-SA 4.0.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Phụ đề lấy qua endpoint không chính thức của YouTube (`src/lib/transcript.ts`) — có thể hỏng nếu YouTube thay đổi; khi đó trang vẫn xem được video nhưng không có phụ đề.
+API key chỉ dùng ở server. Kết quả API được cache bằng `"use cache"` (vài giờ), lỗi chỉ cache vài giây.
