@@ -1,5 +1,6 @@
 import "server-only";
 import { cacheLife } from "next/cache";
+import { ProxyAgent, fetch as undiciFetch } from "undici";
 import { analyzeSentences } from "./japanese/analyze";
 import type { Cue, SubtitleLanguage, Transcript } from "./youtube/types";
 
@@ -12,6 +13,16 @@ import type { Cue, SubtitleLanguage, Transcript } from "./youtube/types";
 const INNERTUBE_URL = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
 const ANDROID_CLIENT = { clientName: "ANDROID", clientVersion: "20.10.38", androidSdkVersion: 34 };
 
+/*
+ * YouTube chặn IP datacenter (Vercel…) → đặt YOUTUBE_PROXY_URL (proxy residential,
+ * dạng http://user:pass@host:port) để mọi request tới YouTube đi qua proxy đó.
+ */
+const proxy = process.env.YOUTUBE_PROXY_URL ? new ProxyAgent(process.env.YOUTUBE_PROXY_URL) : undefined;
+
+function youtubeFetch(url: string | URL, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
+  return proxy ? undiciFetch(url, { ...init, dispatcher: proxy }) : fetch(url, init);
+}
+
 type CaptionTrack = {
   baseUrl: string;
   languageCode: string;
@@ -21,7 +32,7 @@ type CaptionTrack = {
 type Json3 = { events?: { tStartMs: number; dDurationMs?: number; segs?: { utf8: string }[] }[] };
 
 async function getCaptionTracks(videoId: string): Promise<CaptionTrack[]> {
-  const res = await fetch(INNERTUBE_URL, {
+  const res = await youtubeFetch(INNERTUBE_URL, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -32,6 +43,12 @@ async function getCaptionTracks(videoId: string): Promise<CaptionTrack[]> {
   });
   if (!res.ok) throw new Error(`innertube player ${res.status}`);
   const data = await res.json();
+  // IP datacenter (Vercel, VPS…) thường bị chặn: status LOGIN_REQUIRED "Sign in to confirm you're
+  // not a bot", không kèm caption. Ném lỗi để log ra lý do và không cache "không có phụ đề" nhiều ngày.
+  const status = data?.playabilityStatus?.status;
+  if (status && status !== "OK") {
+    throw new Error(`innertube player ${status}: ${data.playabilityStatus.reason ?? ""}`);
+  }
   return data?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
 }
 
@@ -51,7 +68,7 @@ function toCues(json: Json3): Cue[] {
 async function fetchCues(track: CaptionTrack): Promise<Cue[]> {
   const url = new URL(track.baseUrl);
   url.searchParams.set("fmt", "json3");
-  const res = await fetch(url);
+  const res = await youtubeFetch(url);
   if (!res.ok) throw new Error(`timedtext ${res.status}`);
   return toCues(await res.json());
 }
