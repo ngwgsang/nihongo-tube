@@ -6,12 +6,34 @@ import type { Cue, SubtitleLanguage, Transcript } from "./youtube/types";
 
 /*
  * YouTube Data API không cho tải phụ đề của video người khác, nên ở đây dùng
- * endpoint nội bộ (innertube) giống app Android để lấy danh sách caption track.
+ * endpoint nội bộ (innertube) giống app di động để lấy danh sách caption track.
  * Không chính thức — có thể hỏng nếu YouTube thay đổi; khi đó trả về null.
  */
 
 const INNERTUBE_URL = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
-const ANDROID_CLIENT = { clientName: "ANDROID", clientVersion: "20.10.38", androidSdkVersion: 34 };
+
+/*
+ * Các client thử lần lượt: client đầu bị chặn (thường gặp với IP datacenter) hoặc phụ đề trả về rỗng
+ * thì chuyển sang client sau. Chỉ giữ những client lấy được phụ đề mà không cần PO token.
+ */
+const CLIENTS = [
+  {
+    client: { clientName: "ANDROID", clientVersion: "20.10.38", androidSdkVersion: 34 },
+    userAgent: "com.google.android.youtube/20.10.38 (Linux; U; Android 14)",
+  },
+  {
+    client: {
+      clientName: "IOS",
+      clientVersion: "20.10.4",
+      deviceMake: "Apple",
+      deviceModel: "iPhone16,2",
+      osName: "iPhone",
+      osVersion: "18.3.2.22D82",
+    },
+    userAgent: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+  },
+];
+type Client = (typeof CLIENTS)[number];
 
 /*
  * YouTube chặn IP datacenter (Vercel…) → đặt YOUTUBE_PROXY_URL (proxy residential,
@@ -31,15 +53,12 @@ type CaptionTrack = {
 };
 type Json3 = { events?: { tStartMs: number; dDurationMs?: number; segs?: { utf8: string }[] }[] };
 
-async function getCaptionTracks(videoId: string): Promise<CaptionTrack[]> {
+async function getCaptionTracks(videoId: string, { client, userAgent }: Client): Promise<CaptionTrack[]> {
   const res = await youtubeFetch(INNERTUBE_URL, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "user-agent": `com.google.android.youtube/${ANDROID_CLIENT.clientVersion} (Linux; U; Android 14)`,
-    },
+    headers: { "content-type": "application/json", "user-agent": userAgent },
     // hl=vi để tên các track trả về bằng tiếng Việt (vd "Tiếng Anh").
-    body: JSON.stringify({ context: { client: { ...ANDROID_CLIENT, hl: "vi" } }, videoId }),
+    body: JSON.stringify({ context: { client: { ...client, hl: "vi" } }, videoId }),
   });
   if (!res.ok) throw new Error(`innertube player ${res.status}`);
   const data = await res.json();
@@ -70,7 +89,26 @@ async function fetchCues(track: CaptionTrack): Promise<Cue[]> {
   url.searchParams.set("fmt", "json3");
   const res = await youtubeFetch(url);
   if (!res.ok) throw new Error(`timedtext ${res.status}`);
-  return toCues(await res.json());
+  // Track đòi PO token thì YouTube trả 200 với body rỗng.
+  const body = await res.text();
+  if (!body) throw new Error("timedtext empty");
+  return toCues(JSON.parse(body));
+}
+
+/**
+ * Chạy `fn` với danh sách track của từng client cho tới khi một client thành công.
+ * Mọi client đều lỗi thì ném lỗi gộp lý do của từng client.
+ */
+async function withClients<T>(videoId: string, fn: (tracks: CaptionTrack[]) => Promise<T>): Promise<T> {
+  const errors: string[] = [];
+  for (const c of CLIENTS) {
+    try {
+      return await fn(await getCaptionTracks(videoId, c));
+    } catch (e) {
+      errors.push(`${c.client.clientName}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  throw new Error(errors.join(" | "));
 }
 
 function overlap(a: Cue, b: Cue): number {
@@ -134,16 +172,15 @@ export async function getTranslation(videoId: string, lang: string): Promise<(st
   "use cache";
 
   try {
-    const tracks = await getCaptionTracks(videoId);
-    const jaTrack = pickTrack(tracks, "ja");
-    const track = pickTrack(tracks, lang);
-    if (!jaTrack || !track) {
-      cacheLife("days");
-      return null;
-    }
-    const [ja, other] = await Promise.all([fetchCues(jaTrack), fetchCues(track)]);
+    const result = await withClients(videoId, async (tracks) => {
+      const jaTrack = pickTrack(tracks, "ja");
+      const track = pickTrack(tracks, lang);
+      if (!jaTrack || !track) return null;
+      const [ja, other] = await Promise.all([fetchCues(jaTrack), fetchCues(track)]);
+      return alignTranslation(ja, other).map((t) => t ?? null);
+    });
     cacheLife("days");
-    return alignTranslation(ja, other).map((t) => t ?? null);
+    return result;
   } catch (e) {
     console.error("Translation captions failed", videoId, lang, e);
     cacheLife("minutes");
@@ -169,18 +206,22 @@ async function withAnalysis(cues: Cue[]): Promise<{ cues: Cue[]; complete: boole
 export async function getJapaneseTranscript(videoId: string): Promise<Transcript | null> {
   "use cache";
 
-  const tracks = await getCaptionTracks(videoId);
-  const track = pickTrack(tracks, "ja");
-  if (!track) {
+  let found;
+  try {
+    found = await withClients(videoId, async (tracks) => {
+      const track = pickTrack(tracks, "ja");
+      return track ? { tracks, track, raw: await fetchCues(track) } : null;
+    });
+  } catch (e) {
+    console.error("Japanese captions failed", videoId, e);
+    throw e;
+  }
+  if (!found || found.raw.length === 0) {
     cacheLife("days");
     return null;
   }
 
-  const raw = await fetchCues(track);
-  if (raw.length === 0) {
-    cacheLife("days");
-    return null;
-  }
+  const { tracks, track, raw } = found;
   const { cues, complete } = await withAnalysis(raw);
   if (complete) cacheLife("days");
   else cacheLife("minutes");
